@@ -10,48 +10,97 @@ public class TreeComparator {
     }
     
     public static void main(String[] args) throws IOException {
-        if (args.length < 2) {
-            System.err.println("Usage: java TreeComparator <old_tree.txt> <new_tree.txt>");
+        Scanner scanner = new Scanner(System.in);
+        
+        String oldFile;
+        String newFile;
+        String outputDir = ".";
+        
+        // Get file paths from user
+        if (args.length >= 2) {
+            oldFile = args[0];
+            newFile = args[1];
+            if (args.length >= 3) {
+                outputDir = args[2];
+            }
+        } else {
+            System.out.println("=== Tree Comparator ===\n");
+            
+            System.out.print("Enter path to OLD tree file: ");
+            oldFile = scanner.nextLine().trim();
+            
+            System.out.print("Enter path to NEW tree file: ");
+            newFile = scanner.nextLine().trim();
+            
+            System.out.print("Enter output directory (default '.'): ");
+            String outDirInput = scanner.nextLine().trim();
+            if (!outDirInput.isEmpty()) {
+                outputDir = outDirInput;
+            }
+        }
+        
+        // Validate file paths
+        if (!new File(oldFile).exists()) {
+            System.err.println("Error: Old tree file not found: " + oldFile);
+            scanner.close();
+            System.exit(1);
+        }
+        if (!new File(newFile).exists()) {
+            System.err.println("Error: New tree file not found: " + newFile);
+            scanner.close();
             System.exit(1);
         }
         
-        String oldFile = args[0];
-        String newFile = args[1];
+        scanner.close();
         
-        System.out.println("Reading old tree: " + oldFile);
-        List<String> oldLines = readLines(oldFile);
-        
-        System.out.println("Reading new tree: " + newFile);
-        List<String> newLines = readLines(newFile);
-        
-        System.out.println("Old tree has " + oldLines.size() + " lines");
-        System.out.println("New tree has " + newLines.size() + " lines");
-        
-        // Compare and find differences
-        DiffResult diff = compareTrees(oldLines, newLines);
-        
-        // Output results
-        String outputPath = "comparison_result.txt";
-        System.out.println("\nWriting comparison result to: " + outputPath);
-        writeComparisonOutput(outputPath, diff);
-        
-        // Output old tree in path format
-        String oldPathOutput = "old_tree_paths.txt";
-        System.out.println("Writing old tree paths to: " + oldPathOutput);
-        writePathFormat(oldPathOutput, oldLines);
-        
-        // Output new tree in path format
-        String newPathOutput = "new_tree_paths.txt";
-        System.out.println("Writing new tree paths to: " + newPathOutput);
-        writePathFormat(newPathOutput, newLines);
-        
-        System.out.println("\nDone! Files created:");
-        System.out.println("  - " + outputPath);
-        System.out.println("  - " + oldPathOutput);
-        System.out.println("  - " + newPathOutput);
-        System.out.println("\nSummary:");
-        System.out.println("  Deleted: " + diff.deleted.size());
-        System.out.println("  Added: " + diff.added.size());
+        try {
+            System.out.println("\nReading old tree: " + oldFile);
+            List<String> oldLines = readLines(oldFile);
+            
+            System.out.println("Reading new tree: " + newFile);
+            List<String> newLines = readLines(newFile);
+            
+            System.out.println("Old tree has " + oldLines.size() + " lines");
+            System.out.println("New tree has " + newLines.size() + " lines");
+            
+            // Compare and find differences
+            DiffResult diff = compareTrees(oldLines, newLines);
+            
+            // Create output directory if needed
+            File outputDirFile = new File(outputDir);
+            if (!outputDirFile.exists()) {
+                outputDirFile.mkdirs();
+            }
+            
+            // Output results
+            String comparisonPath = new File(outputDir, "comparison_result.txt").getAbsolutePath();
+            System.out.println("\nWriting comparison result to: " + comparisonPath);
+            writeComparisonOutput(comparisonPath, diff);
+            
+            // Output old tree in path format
+            String oldPathOutput = new File(outputDir, "old_tree_paths.txt").getAbsolutePath();
+            System.out.println("Writing old tree paths to: " + oldPathOutput);
+            writePathFormat(oldPathOutput, oldLines);
+            
+            // Output new tree in path format
+            String newPathOutput = new File(outputDir, "new_tree_paths.txt").getAbsolutePath();
+            System.out.println("Writing new tree paths to: " + newPathOutput);
+            writePathFormat(newPathOutput, newLines);
+            
+            System.out.println("\n=== SUCCESS ===");
+            System.out.println("Files created:");
+            System.out.println("  - " + comparisonPath);
+            System.out.println("  - " + oldPathOutput);
+            System.out.println("  - " + newPathOutput);
+            System.out.println("\nSummary:");
+            System.out.println("  Deleted items: " + diff.deleted.size());
+            System.out.println("  Added items: " + diff.added.size());
+            
+        } catch (IOException e) {
+            System.err.println("Error processing files: " + e.getMessage());
+            e.printStackTrace();
+            System.exit(1);
+        }
     }
     
     /**
@@ -87,7 +136,7 @@ public class TreeComparator {
         for (char c : line.toCharArray()) {
             if (c == ' ') {
                 indent++;
-            } else if (c == '├' || c == '│' || c == '└' || c == '─') {
+            } else if (c == '|' || c == '+' || c == '-') {
                 // Tree characters count as single indent
                 break;
             } else {
@@ -102,7 +151,7 @@ public class TreeComparator {
      */
     static String extractName(String line) {
         // Remove tree characters and leading spaces
-        String cleaned = line.replaceAll("[├│└─┬┼]", " ").trim();
+        String cleaned = line.replaceAll("[|+\\-]", " ").trim();
         return cleaned;
     }
     
@@ -141,7 +190,7 @@ public class TreeComparator {
             
             // Write deletions
             writer.write("DELETED (no longer present):\n");
-            writer.write("─".repeat(60) + "\n");
+            writer.write("------------------------------------------------------------\n");
             if (diff.deleted.isEmpty()) {
                 writer.write("[No deletions]\n");
             } else {
@@ -152,7 +201,7 @@ public class TreeComparator {
             
             writer.write("\n\n");
             writer.write("ADDED (newly created):\n");
-            writer.write("─".repeat(60) + "\n");
+            writer.write("------------------------------------------------------------\n");
             if (diff.added.isEmpty()) {
                 writer.write("[No additions]\n");
             } else {
@@ -162,7 +211,7 @@ public class TreeComparator {
             }
             
             writer.write("\n");
-            writer.write("─".repeat(60) + "\n");
+            writer.write("------------------------------------------------------------\n");
             writer.write("Total Deleted: " + diff.deleted.size() + "\n");
             writer.write("Total Added: " + diff.added.size() + "\n");
         }
@@ -197,7 +246,6 @@ public class TreeComparator {
                 writer.write(fullPath.toString() + "\n");
                 
                 // Add current item to stack (could be file or directory)
-                // We'll assume it's a directory if processing continues deeper
                 pathStack.push(name);
             }
         }
