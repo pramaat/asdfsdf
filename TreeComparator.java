@@ -4,9 +4,35 @@ import java.util.*;
 
 public class TreeComparator {
     
-    static class DiffResult {
-        List<String> deleted = new ArrayList<>();
-        List<String> added = new ArrayList<>();
+    static class TreeNode {
+        String name;
+        int depth;
+        boolean isFile;
+        Map<String, TreeNode> children = new LinkedHashMap<>();
+        TreeNode parent;
+        
+        TreeNode(String name, int depth, boolean isFile) {
+            this.name = name;
+            this.depth = depth;
+            this.isFile = isFile;
+        }
+        
+        void addChild(String key, TreeNode child) {
+            children.put(key, child);
+            child.parent = this;
+        }
+        
+        String getFullPath(String separator) {
+            if (parent == null || parent.name == null) {
+                return name;
+            }
+            return parent.getFullPath(separator) + separator + name;
+        }
+    }
+    
+    static class ComparisonResult {
+        Map<String, TreeNode> deleted = new LinkedHashMap<>();
+        Map<String, TreeNode> added = new LinkedHashMap<>();
     }
     
     public static void main(String[] args) throws IOException {
@@ -63,8 +89,13 @@ public class TreeComparator {
             System.out.println("Old tree has " + oldLines.size() + " lines");
             System.out.println("New tree has " + newLines.size() + " lines");
             
-            // Compare and find differences
-            DiffResult diff = compareTrees(oldLines, newLines);
+            // Parse tree structures
+            System.out.println("\nParsing tree structures...");
+            TreeNode oldRoot = parseTree(oldLines);
+            TreeNode newRoot = parseTree(newLines);
+            
+            // Compare trees
+            ComparisonResult comparison = compareTrees(oldRoot, newRoot);
             
             // Create output directory if needed
             File outputDirFile = new File(outputDir);
@@ -72,29 +103,15 @@ public class TreeComparator {
                 outputDirFile.mkdirs();
             }
             
-            // Output results
-            String comparisonPath = new File(outputDir, "comparison_result.txt").getAbsolutePath();
-            System.out.println("\nWriting comparison result to: " + comparisonPath);
-            writeComparisonOutput(comparisonPath, diff);
-            
-            // Output old tree in path format
-            String oldPathOutput = new File(outputDir, "old_tree_paths.txt").getAbsolutePath();
-            System.out.println("Writing old tree paths to: " + oldPathOutput);
-            writePathFormat(oldPathOutput, oldLines);
-            
-            // Output new tree in path format
-            String newPathOutput = new File(outputDir, "new_tree_paths.txt").getAbsolutePath();
-            System.out.println("Writing new tree paths to: " + newPathOutput);
-            writePathFormat(newPathOutput, newLines);
+            // Write output
+            String outputPath = new File(outputDir, "comparison_result.txt").getAbsolutePath();
+            System.out.println("Writing comparison result to: " + outputPath);
+            writeComparisonOutput(outputPath, comparison);
             
             System.out.println("\n=== SUCCESS ===");
-            System.out.println("Files created:");
-            System.out.println("  - " + comparisonPath);
-            System.out.println("  - " + oldPathOutput);
-            System.out.println("  - " + newPathOutput);
-            System.out.println("\nSummary:");
-            System.out.println("  Deleted items: " + diff.deleted.size());
-            System.out.println("  Added items: " + diff.added.size());
+            System.out.println("Deleted items: " + comparison.deleted.size());
+            System.out.println("Added items: " + comparison.added.size());
+            System.out.println("\nOutput file: " + outputPath);
             
         } catch (IOException e) {
             System.err.println("Error processing files: " + e.getMessage());
@@ -103,15 +120,11 @@ public class TreeComparator {
         }
     }
     
-    /**
-     * Read lines from tree command output, skipping empty lines and summary lines
-     */
     static List<String> readLines(String filePath) throws IOException {
         List<String> lines = new ArrayList<>();
         try (BufferedReader reader = new BufferedReader(new FileReader(filePath))) {
             String line;
             while ((line = reader.readLine()) != null) {
-                // Skip empty lines and summary lines (typically last line with file/folder count)
                 if (!line.trim().isEmpty() && !isSummaryLine(line)) {
                     lines.add(line);
                 }
@@ -120,134 +133,166 @@ public class TreeComparator {
         return lines;
     }
     
-    /**
-     * Check if line is a summary line from tree command
-     */
     static boolean isSummaryLine(String line) {
-        // Pattern like "    5 dirs,    10 files"
         return line.matches(".*\\d+\\s+dir.*") || line.matches(".*\\d+\\s+file.*");
     }
     
-    /**
-     * Get indentation level of a line in tree format
-     */
-    static int getIndentLevel(String line) {
-        int indent = 0;
+    static int getDepth(String line) {
+        int depth = 0;
         for (char c : line.toCharArray()) {
             if (c == ' ') {
-                indent++;
-            } else if (c == '|' || c == '+' || c == '-') {
-                // Tree characters count as single indent
-                break;
+                depth++;
+            } else if (c == '|' || c == '+' || c == '-' || c == '\\') {
+                continue;
             } else {
                 break;
             }
         }
-        return indent;
+        return depth / 4; // Assuming 4 spaces per level
     }
     
-    /**
-     * Extract clean name from tree formatted line
-     */
     static String extractName(String line) {
-        // Remove tree characters and leading spaces
-        String cleaned = line.replaceAll("[|+\\-]", " ").trim();
+        String cleaned = line.replaceAll("[|+\\\\-]", " ").trim();
         return cleaned;
     }
     
-    /**
-     * Compare two tree outputs and find additions and deletions
-     */
-    static DiffResult compareTrees(List<String> oldLines, List<String> newLines) {
-        DiffResult result = new DiffResult();
+    static boolean isFile(String line) {
+        // Simple heuristic: if it has an extension, it's likely a file
+        String name = extractName(line);
+        return name.contains(".");
+    }
+    
+    static TreeNode parseTree(List<String> lines) {
+        TreeNode root = new TreeNode(null, -1, false);
+        TreeNode[] levelStack = new TreeNode[20]; // Support up to 20 levels
+        levelStack[0] = root;
         
-        Set<String> oldSet = new HashSet<>(oldLines);
-        Set<String> newSet = new HashSet<>(newLines);
-        
-        // Find deletions: lines in old but not in new, maintaining tree structure
-        for (String line : oldLines) {
-            if (!newSet.contains(line)) {
-                result.deleted.add(line);
+        for (String line : lines) {
+            int depth = getDepth(line);
+            String name = extractName(line);
+            boolean isFileFlag = isFile(line);
+            
+            TreeNode node = new TreeNode(name, depth, isFileFlag);
+            
+            // Add to parent at previous level
+            if (depth > 0) {
+                TreeNode parent = levelStack[depth - 1];
+                if (parent != null) {
+                    parent.addChild(name, node);
+                }
+            } else {
+                root.addChild(name, node);
             }
+            
+            levelStack[depth] = node;
         }
         
-        // Find additions: lines in new but not in old, maintaining tree structure
-        for (String line : newLines) {
-            if (!oldSet.contains(line)) {
-                result.added.add(line);
-            }
-        }
+        return root;
+    }
+    
+    static ComparisonResult compareTrees(TreeNode oldRoot, TreeNode newRoot) {
+        ComparisonResult result = new ComparisonResult();
+        
+        // Find deletions
+        findDeletions(oldRoot, newRoot, result);
+        
+        // Find additions
+        findAdditions(oldRoot, newRoot, result);
         
         return result;
     }
     
-    /**
-     * Write comparison output in tree format
-     */
-    static void writeComparisonOutput(String outputPath, DiffResult diff) throws IOException {
+    static void findDeletions(TreeNode oldNode, TreeNode newRoot, ComparisonResult result) {
+        for (Map.Entry<String, TreeNode> entry : oldNode.children.entrySet()) {
+            String name = entry.getKey();
+            TreeNode oldChild = entry.getValue();
+            TreeNode newChild = findNodeInTree(newRoot, oldChild);
+            
+            if (newChild == null) {
+                // This node was deleted
+                result.deleted.put(oldChild.getFullPath("/"), oldChild);
+            } else {
+                // Recursively check children
+                findDeletions(oldChild, newRoot, result);
+            }
+        }
+    }
+    
+    static void findAdditions(TreeNode oldRoot, TreeNode newNode, ComparisonResult result) {
+        for (Map.Entry<String, TreeNode> entry : newNode.children.entrySet()) {
+            String name = entry.getKey();
+            TreeNode newChild = entry.getValue();
+            TreeNode oldChild = findNodeInTree(oldRoot, newChild);
+            
+            if (oldChild == null) {
+                // This node was added
+                result.added.put(newChild.getFullPath("/"), newChild);
+            } else {
+                // Recursively check children
+                findAdditions(oldRoot, newChild, result);
+            }
+        }
+    }
+    
+    static TreeNode findNodeInTree(TreeNode root, TreeNode target) {
+        if (root.name != null && root.name.equals(target.name)) {
+            return root;
+        }
+        
+        for (TreeNode child : root.children.values()) {
+            TreeNode found = findNodeByPath(child, target);
+            if (found != null) {
+                return found;
+            }
+        }
+        
+        return null;
+    }
+    
+    static TreeNode findNodeByPath(TreeNode node, TreeNode target) {
+        if (node.name != null && node.name.equals(target.name) && node.isFile == target.isFile) {
+            return node;
+        }
+        
+        for (TreeNode child : node.children.values()) {
+            TreeNode found = findNodeByPath(child, target);
+            if (found != null) {
+                return found;
+            }
+        }
+        
+        return null;
+    }
+    
+    static void writeComparisonOutput(String outputPath, ComparisonResult comparison) throws IOException {
         try (BufferedWriter writer = new BufferedWriter(new FileWriter(outputPath))) {
             writer.write("=== TREE COMPARISON RESULT ===\n\n");
             
             // Write deletions
-            writer.write("DELETED (no longer present):\n");
-            writer.write("------------------------------------------------------------\n");
-            if (diff.deleted.isEmpty()) {
+            writer.write("DELETED:\n");
+            writer.write("==========\n");
+            if (comparison.deleted.isEmpty()) {
                 writer.write("[No deletions]\n");
             } else {
-                for (String line : diff.deleted) {
-                    writer.write(line + "\n");
-                }
-            }
-            
-            writer.write("\n\n");
-            writer.write("ADDED (newly created):\n");
-            writer.write("------------------------------------------------------------\n");
-            if (diff.added.isEmpty()) {
-                writer.write("[No additions]\n");
-            } else {
-                for (String line : diff.added) {
-                    writer.write(line + "\n");
+                for (String path : comparison.deleted.keySet()) {
+                    writer.write(path + "\n");
                 }
             }
             
             writer.write("\n");
-            writer.write("------------------------------------------------------------\n");
-            writer.write("Total Deleted: " + diff.deleted.size() + "\n");
-            writer.write("Total Added: " + diff.added.size() + "\n");
-        }
-    }
-    
-    /**
-     * Convert tree format to full file paths
-     */
-    static void writePathFormat(String outputPath, List<String> treeLines) throws IOException {
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(outputPath))) {
-            Stack<String> pathStack = new Stack<>();
-            
-            for (String line : treeLines) {
-                String name = extractName(line);
-                int indent = getIndentLevel(line);
-                
-                // Calculate depth (each 4 spaces = 1 level, accounting for tree chars)
-                int depth = indent / 4;
-                
-                // Pop stack to match current depth
-                while (pathStack.size() > depth) {
-                    pathStack.pop();
+            writer.write("ADDED:\n");
+            writer.write("==========\n");
+            if (comparison.added.isEmpty()) {
+                writer.write("[No additions]\n");
+            } else {
+                for (String path : comparison.added.keySet()) {
+                    writer.write(path + "\n");
                 }
-                
-                // Build full path
-                StringBuilder fullPath = new StringBuilder();
-                for (String p : pathStack) {
-                    fullPath.append(p).append(File.separator);
-                }
-                fullPath.append(name);
-                
-                writer.write(fullPath.toString() + "\n");
-                
-                // Add current item to stack (could be file or directory)
-                pathStack.push(name);
             }
+            
+            writer.write("\n");
+            writer.write("Summary: " + comparison.deleted.size() + " deleted, " + 
+                        comparison.added.size() + " added\n");
         }
     }
 }
