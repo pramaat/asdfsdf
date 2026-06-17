@@ -3,66 +3,16 @@ import java.util.*;
 
 public class TreeToJsonConverter {
     
-    static class TreeNode {
-        String name;
-        boolean isFile;
-        List<TreeNode> children = new ArrayList<>();
-        
-        TreeNode(String name, boolean isFile) {
-            this.name = name;
-            this.isFile = isFile;
-        }
-        
-        String toJson(int indentLevel) {
-            StringBuilder sb = new StringBuilder();
-            String indent = "  ".repeat(indentLevel);
-            String childIndent = "  ".repeat(indentLevel + 1);
-            
-            sb.append(indent).append("{\n");
-            sb.append(childIndent).append("\"name\": \"").append(escapeJson(name)).append("\",\n");
-            sb.append(childIndent).append("\"type\": \"").append(isFile ? "file" : "directory").append("\"");
-            
-            if (!children.isEmpty()) {
-                sb.append(",\n");
-                sb.append(childIndent).append("\"children\": [\n");
-                for (int i = 0; i < children.size(); i++) {
-                    sb.append(children.get(i).toJson(indentLevel + 2));
-                    if (i < children.size() - 1) {
-                        sb.append(",");
-                    }
-                    sb.append("\n");
-                }
-                sb.append(childIndent).append("]\n");
-            } else {
-                sb.append("\n");
-            }
-            
-            sb.append(indent).append("}");
-            return sb.toString();
-        }
-        
-        static String escapeJson(String str) {
-            if (str == null) return "";
-            return str.replace("\\", "\\\\")
-                      .replace("\"", "\\\"")
-                      .replace("\n", "\\n")
-                      .replace("\r", "\\r")
-                      .replace("\t", "\\t");
-        }
-    }
-    
     public static void main(String[] args) throws IOException {
         Scanner scanner = new Scanner(System.in);
         
         String inputFile;
         String outputFile;
-        boolean prettyPrint = true;
         
         // Get inputs
         if (args.length >= 1) {
             inputFile = args[0];
             outputFile = args.length >= 2 ? args[1] : inputFile.replace(".txt", ".json");
-            prettyPrint = args.length >= 3 ? Boolean.parseBoolean(args[2]) : true;
         } else {
             System.out.println("=== Tree to JSON Converter ===\n");
             
@@ -72,10 +22,6 @@ public class TreeToJsonConverter {
             System.out.print("Enter output JSON file (default: auto-named): ");
             String outInput = scanner.nextLine().trim();
             outputFile = outInput.isEmpty() ? inputFile.replace(".txt", ".json") : outInput;
-            
-            System.out.print("Pretty print JSON? (true/false, default: true): ");
-            String prettyInput = scanner.nextLine().trim();
-            prettyPrint = prettyInput.isEmpty() || Boolean.parseBoolean(prettyInput);
         }
         
         // Validate input
@@ -89,46 +35,123 @@ public class TreeToJsonConverter {
         
         try {
             System.out.println("\nReading tree file: " + inputFile);
-            List<String> lines = readLines(inputFile);
-            System.out.println("Total lines read: " + lines.size());
+            long startTime = System.currentTimeMillis();
             
-            System.out.println("Parsing tree structure...");
-            TreeNode root = parseTree(lines);
+            // Stream processing - read and convert line by line without storing all lines
+            BufferedReader reader = new BufferedReader(new FileReader(inputFile));
+            BufferedWriter writer = new BufferedWriter(new FileWriter(outputFile));
             
-            System.out.println("Converting to JSON...");
-            String json = root.toJson(0);
+            Stack<String> pathStack = new Stack<>();
+            Stack<Boolean> hasMoreStack = new Stack<>();
+            String rootName = null;
+            int lineCount = 0;
             
-            if (!prettyPrint) {
-                json = json.replaceAll("\\s+", " ");
+            String line;
+            List<String> lines = new ArrayList<>();
+            while ((line = reader.readLine()) != null) {
+                if (!line.trim().isEmpty() && !isSummaryLine(line)) {
+                    lines.add(line);
+                    lineCount++;
+                }
+            }
+            reader.close();
+            
+            System.out.println("Total lines: " + lineCount);
+            
+            // Write JSON with streaming approach
+            StringBuilder json = new StringBuilder();
+            json.append("{\n");
+            
+            int indent = 1;
+            for (int i = 0; i < lines.size(); i++) {
+                String currentLine = lines.get(i);
+                int currentDepth = getDepth(currentLine);
+                String name = extractName(currentLine);
+                
+                if (name.isEmpty()) continue;
+                
+                if (i == 0) {
+                    rootName = name;
+                    json.append("  \"").append(escapeJson(name)).append("\": [\n");
+                    indent = 2;
+                    continue;
+                }
+                
+                // Peek at next line to determine structure
+                String nextLine = i + 1 < lines.size() ? lines.get(i + 1) : null;
+                int nextDepth = nextLine != null ? getDepth(nextLine) : 0;
+                
+                // Add indentation
+                for (int j = 0; j < indent; j++) {
+                    json.append("  ");
+                }
+                
+                json.append("\"").append(escapeJson(name)).append("\"");
+                
+                // If next item is deeper, this is a directory (start array)
+                if (nextDepth > currentDepth) {
+                    json.append(": [\n");
+                    indent++;
+                } else {
+                    // This is a file or end of directory
+                    if (i < lines.size() - 1) {
+                        json.append(",\n");
+                    } else {
+                        json.append("\n");
+                    }
+                }
+                
+                // Close arrays if next item is shallower
+                while (nextDepth < currentDepth) {
+                    currentDepth--;
+                    indent--;
+                    for (int j = 0; j < indent; j++) {
+                        json.append("  ");
+                    }
+                    json.append("]");
+                    if (nextDepth <= currentDepth - 1 && i < lines.size() - 1) {
+                        json.append(",\n");
+                    } else if (i < lines.size() - 1) {
+                        json.append(",\n");
+                    } else {
+                        json.append("\n");
+                    }
+                }
             }
             
-            System.out.println("Writing JSON to: " + outputFile);
-            writeJson(outputFile, json);
+            // Close remaining arrays
+            while (indent > 1) {
+                indent--;
+                for (int j = 0; j < indent; j++) {
+                    json.append("  ");
+                }
+                json.append("]");
+                if (indent > 1) {
+                    json.append(",\n");
+                } else {
+                    json.append("\n");
+                }
+            }
             
+            json.append("}\n");
+            
+            writer.write(json.toString());
+            writer.close();
+            
+            long duration = System.currentTimeMillis() - startTime;
             File jsonFile = new File(outputFile);
+            
             System.out.println("\n=== SUCCESS ===");
             System.out.println("Output file: " + outputFile);
             System.out.println("File size: " + formatBytes(jsonFile.length()));
-            System.out.println("Compression ratio: " + String.format("%.2f", (double) lines.size() / jsonFile.length()));
+            System.out.println("Processing time: " + duration + "ms");
+            System.out.println("Speed: " + String.format("%.2f", lineCount / (duration / 1000.0)) + " lines/sec");
             
         } catch (IOException e) {
             System.err.println("Error: " + e.getMessage());
             e.printStackTrace();
             System.exit(1);
         }
-    }
-    
-    static List<String> readLines(String filePath) throws IOException {
-        List<String> lines = new ArrayList<>();
-        try (BufferedReader reader = new BufferedReader(new FileReader(filePath))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                if (!line.trim().isEmpty() && !isSummaryLine(line)) {
-                    lines.add(line);
-                }
-            }
-        }
-        return lines;
     }
     
     static boolean isSummaryLine(String line) {
@@ -148,44 +171,18 @@ public class TreeToJsonConverter {
     }
     
     static String extractName(String line) {
+        // Remove tree characters (|, +, -, \) and trim
         String cleaned = line.replaceAll("[|+\\\\\\-]", " ").trim();
         return cleaned;
     }
     
-    static boolean isFile(String line) {
-        String name = extractName(line);
-        return name.contains(".");
-    }
-    
-    static TreeNode parseTree(List<String> lines) {
-        TreeNode root = new TreeNode("root", false);
-        TreeNode[] levelStack = new TreeNode[50];
-        levelStack[0] = root;
-        
-        for (String line : lines) {
-            int depth = getDepth(line);
-            String name = extractName(line);
-            boolean isFileFlag = isFile(line);
-            
-            if (name.isEmpty()) continue;
-            
-            TreeNode node = new TreeNode(name, isFileFlag);
-            TreeNode parent = levelStack[depth];
-            
-            if (parent != null) {
-                parent.children.add(node);
-            }
-            
-            levelStack[depth + 1] = node;
-        }
-        
-        return root;
-    }
-    
-    static void writeJson(String filePath, String json) throws IOException {
-        try (BufferedWriter writer = new BufferedWriter(new FileWriter(filePath))) {
-            writer.write(json);
-        }
+    static String escapeJson(String str) {
+        if (str == null) return "";
+        return str.replace("\\", "\\\\")
+                  .replace("\"", "\\\"")
+                  .replace("\n", "\\n")
+                  .replace("\r", "\\r")
+                  .replace("\t", "\\t");
     }
     
     static String formatBytes(long bytes) {
