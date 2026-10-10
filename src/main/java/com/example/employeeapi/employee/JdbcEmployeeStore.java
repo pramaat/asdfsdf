@@ -8,7 +8,6 @@ import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
 import java.sql.PreparedStatement;
-import java.sql.Statement;
 import java.util.List;
 
 @Repository
@@ -46,7 +45,7 @@ public class JdbcEmployeeStore implements EmployeeStore {
         GeneratedKeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
             PreparedStatement statement = connection.prepareStatement(
-                    "INSERT INTO employees (name, encrypted_salary) VALUES (?, ?)", Statement.RETURN_GENERATED_KEYS);
+                    "INSERT INTO employees (name, encrypted_salary) VALUES (?, ?)", new String[]{"id"});
             statement.setString(1, name);
             statement.setString(2, encryptedSalary);
             return statement;
