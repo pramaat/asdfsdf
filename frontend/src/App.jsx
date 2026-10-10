@@ -20,7 +20,7 @@ async function request(path, options = {}) {
   const response = await fetch(path, { ...options, headers });
   if (!response.ok) {
     const result = await response.json().catch(() => null);
-    const error = new Error(result?.message || (response.status === 401 ? "Email or password is incorrect." : "The request could not be completed."));
+    const error = new Error(result?.message || result?.detail || (response.status === 401 ? "Email or password is incorrect." : "The request could not be completed."));
     error.status = response.status;
     throw error;
   }

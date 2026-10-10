@@ -11,6 +11,11 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.greaterThan;
@@ -26,6 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @WithMockUser
+@Import(EmployeeControllerTest.TestEventsConfiguration.class)
 class EmployeeControllerTest {
     @Autowired
     private MockMvc mockMvc;
@@ -35,6 +41,9 @@ class EmployeeControllerTest {
 
     @Autowired
     private ObjectMapper objectMapper;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @BeforeEach
     void clearEmployees() {
@@ -57,6 +66,10 @@ class EmployeeControllerTest {
                 .andReturn();
 
         Employee employee = objectMapper.readValue(result.getResponse().getContentAsString(), Employee.class);
+        String storedSalary = jdbcTemplate.queryForObject(
+                "SELECT encrypted_salary FROM employees WHERE id = ?", String.class, employee.id());
+        org.junit.jupiter.api.Assertions.assertTrue(storedSalary.startsWith("v1."));
+        org.junit.jupiter.api.Assertions.assertFalse(storedSalary.contains("50000"));
 
         mockMvc.perform(get("/api/employees/{id}", employee.id()))
                 .andExpect(status().isOk())
@@ -92,7 +105,9 @@ class EmployeeControllerTest {
     @Test
     void returnsNotFoundForMissingEmployee() throws Exception {
         mockMvc.perform(get("/api/employees/99"))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.detail", is("Employee 99 was not found")))
+                .andExpect(jsonPath("$.title", is("Not Found")));
 
         mockMvc.perform(put("/api/employees/99")
                         .with(SecurityMockMvcRequestPostProcessors.csrf())
@@ -100,11 +115,13 @@ class EmployeeControllerTest {
                         .content("""
                                 {"name":"Alice","salary":50000}
                                 """))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.detail", is("Employee 99 was not found")));
 
         mockMvc.perform(delete("/api/employees/99")
                         .with(SecurityMockMvcRequestPostProcessors.csrf()))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.detail", is("Employee 99 was not found")));
     }
 
     @Test
@@ -116,5 +133,36 @@ class EmployeeControllerTest {
                                 {"name":" ","salary":-1}
                                 """))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void returnsFieldErrorsForInvalidEmployeeAndProblemDetailForMalformedJson() throws Exception {
+        mockMvc.perform(post("/api/employees")
+                        .with(SecurityMockMvcRequestPostProcessors.csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":" ","salary":-1}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title", is("Bad Request")))
+                .andExpect(jsonPath("$.detail", is("The request contains invalid fields")))
+                .andExpect(jsonPath("$.errors.name").exists())
+                .andExpect(jsonPath("$.errors.salary").exists());
+
+        mockMvc.perform(post("/api/employees")
+                        .with(SecurityMockMvcRequestPostProcessors.csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail", is("The request body is missing or malformed")));
+    }
+
+    @TestConfiguration
+    static class TestEventsConfiguration {
+        @Bean
+        @Primary
+        EmployeeEventPublisher testEmployeeEventPublisher() {
+            return event -> { };
+        }
     }
 }

@@ -8,6 +8,7 @@ import org.springframework.security.provisioning.UserDetailsManager;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+import com.example.employeeapi.aop.AuditedOperation;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
@@ -23,6 +24,7 @@ public class AccountService {
     }
 
     @Transactional
+    @AuditedOperation("account.register")
     public AuthResponse register(RegistrationRequest request) {
         if (request.password().getBytes(StandardCharsets.UTF_8).length > 72) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Password must be no more than 72 UTF-8 bytes");

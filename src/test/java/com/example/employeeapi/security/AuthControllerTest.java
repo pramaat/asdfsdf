@@ -93,6 +93,6 @@ class AuthControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(request))
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.message", is("An account with this email already exists")));
+                .andExpect(jsonPath("$.detail", is("An account with this email already exists")));
     }
 }

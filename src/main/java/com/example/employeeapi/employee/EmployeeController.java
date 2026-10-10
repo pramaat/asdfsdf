@@ -1,7 +1,9 @@
 package com.example.employeeapi.employee;
 
 import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -31,7 +33,10 @@ public class EmployeeController {
     @GetMapping("/{id}")
     public ResponseEntity<Employee> findById(@PathVariable int id) {
         Employee employee = employeeService.findById(id);
-        return employee == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(employee);
+        if (employee == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Employee " + id + " was not found");
+        }
+        return ResponseEntity.ok(employee);
     }
 
     @PostMapping
@@ -46,13 +51,17 @@ public class EmployeeController {
             @Valid @RequestBody EmployeeRequest request
     ) {
         Employee employee = employeeService.update(id, request);
-        return employee == null ? ResponseEntity.notFound().build() : ResponseEntity.ok(employee);
+        if (employee == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Employee " + id + " was not found");
+        }
+        return ResponseEntity.ok(employee);
     }
 
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable int id) {
-        return employeeService.delete(id)
-                ? ResponseEntity.noContent().build()
-                : ResponseEntity.notFound().build();
+        if (!employeeService.delete(id)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Employee " + id + " was not found");
+        }
+        return ResponseEntity.noContent().build();
     }
 }
